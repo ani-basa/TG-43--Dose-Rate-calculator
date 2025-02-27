@@ -20,7 +20,7 @@ Features
  Uses JavaScript and the XLSX library to handle Excel file parsing
 
 How to Use
-	1.	Select the source type (Point or Line).
+	1.	Open the .html file and save it in the local system and then Select the source type (Point or Line).
 	2.	Enter the calculation coordinates (x, y, z) and dwell position (x, y, z).
 	3.	Input dwell time (seconds) and source activity (mCi).
 	4.	Upload an Excel file containing interpolated anisotropy and radial dose function data.
@@ -28,7 +28,6 @@ How to Use
 	6.	View computed values for distance, angle, dose rate, and total dose in the results section.
 
 Requirements
-	•	Web browser (Chrome, Firefox, Edge, etc.)
+	
 	•	Excel file containing precomputed dose function data
-	•	Internet connection (for loading the XLSX library)
-
+	
