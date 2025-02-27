@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TG-43 Dose Rate Calculator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.3/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 0;
+        }
+        form {
+            max-width: 600px;
+            margin: auto;
+        }
+        input, button, select {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            font-size: 16px;
+        }
+        .result-section {
+            max-width: 600px;
+            margin: auto;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<h1>TG-43 Dose Rate Calculator</h1>
+<p>Input the parameters to calculate dose rates for either a **point source** or **line source** approximation.</p>
+
+<form id="calc-form">
+    <label for="source-type">Source Type:</label>
+    <select id="source-type" name="source-type">
+        <option value="point">Point Source</option>
+        <option value="line">Line Source</option>
+    </select>
+
+    <label for="calc-x">Calculation Point (x):</label>
+    <input type="text" id="calc-x" name="calc-x" placeholder="e.g., 5" required>
+
+    <label for="calc-y">Calculation Point (y):</label>
+    <input type="text" id="calc-y" name="calc-y" placeholder="e.g., -5" required>
+
+    <label for="calc-z">Calculation Point (z):</label>
+    <input type="text" id="calc-z" name="calc-z" placeholder="e.g., -5" required>
+
+    <label for="dwell-x">Dwell Position (x):</label>
+    <input type="text" id="dwell-x" name="dwell-x" placeholder="e.g., 0" required>
+
+    <label for="dwell-y">Dwell Position (y):</label>
+    <input type="text" id="dwell-y" name="dwell-y" placeholder="e.g., 0" required>
+
+    <label for="dwell-z">Dwell Position (z):</label>
+    <input type="text" id="dwell-z" name="dwell-z" placeholder="e.g., 0" required>
+
+    <label for="dwell-time">Dwell Time (seconds):</label>
+    <input type="text" id="dwell-time" name="dwell-time" placeholder="e.g., 80" required>
+
+    <label for="activity">Activity (mCi):</label>
+    <input type="text" id="activity" name="activity" placeholder="e.g., 10000" required>
+
+    <label for="data-file">Upload Excel File:</label>
+    <input type="file" id="data-file" name="data-file" accept=".xlsx" required>
+
+    <button type="submit">Calculate</button>
+</form>
+
+<div class="result-section" id="result-section" style="display: none;">
+    <h2>Results</h2>
+    <p><strong>Distance (r):</strong> <span id="distance"></span> cm</p>
+    <p><strong>Angle (θ):</strong> <span id="angle"></span> degrees</p>
+    <p><strong>Radial Dose Function (g_L(r)):</strong> <span id="radial-dose"></span></p>
+    <p><strong>Anisotropy Function (F(r,θ)):</strong> <span id="anisotropy"></span></p>
+    <p><strong>Geometrical Factor (G_L(r,θ)):</strong> <span id="geometrical-factor"></span></p>
+    <p><strong>Dose Rate (D(r,θ)):</strong> <span id="dose-rate"></span> cGy/hr</p>
+    <p><strong>Total Dose:</strong> <span id="total-dose"></span> cGy</p>
+</div>
+
+<script>
+    document.getElementById('calc-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const sourceType = document.getElementById('source-type').value;
+
+        // Get coordinates for calculation point and dwell position
+        const calcPoint = [
+            parseFloat(document.getElementById('calc-x').value),
+            parseFloat(document.getElementById('calc-y').value),
+            parseFloat(document.getElementById('calc-z').value),
+        ];
+        const dwellPoint = [
+            parseFloat(document.getElementById('dwell-x').value),
+            parseFloat(document.getElementById('dwell-y').value),
+            parseFloat(document.getElementById('dwell-z').value),
+        ];
+
+        const dwellTime = parseFloat(document.getElementById('dwell-time').value);
+        const activity = parseFloat(document.getElementById('activity').value);
+        const file = document.getElementById('data-file').files[0];
+
+        if (!file) {
+            alert("Please upload the Excel file!");
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+
+            // Read sheets
+            const anisotropySheet = XLSX.utils.sheet_to_json(workbook.Sheets['Interpolated_Anisotropy'], { header: 1 });
+            const radialDoseSheet = XLSX.utils.sheet_to_json(workbook.Sheets['Interpolated_Radial_Dose'], { header: 1 });
+
+            // Calculate distance and angle
+            const r = Math.sqrt(
+                Math.pow(calcPoint[0] - dwellPoint[0], 2) +
+                Math.pow(calcPoint[1] - dwellPoint[1], 2) +
+                Math.pow(calcPoint[2] - dwellPoint[2], 2)
+            );
+
+            const theta = Math.acos((calcPoint[2] - dwellPoint[2]) / r) * (180 / Math.PI);
+
+            // Interpolate radial dose function
+            const radialR = radialDoseSheet.map(row => row[0]);
+            const radialGL = radialDoseSheet.map(row => row[1]);
+            const gL = interpolate(r, radialR, radialGL);
+
+            // Interpolate anisotropy function
+            const thetaValues = anisotropySheet[0].slice(1).map(Number); // Angles in degrees
+            const rValues = anisotropySheet.slice(1).map(row => row[0]); // Radii
+            const anisotropyTable = anisotropySheet.slice(1).map(row => row.slice(1));
+            const F_r = interpolate(r, rValues, anisotropyTable.map(row => interpolate(theta, thetaValues, row)));
+
+            // Geometrical factor
+		let geometricalFactor;
+		const sourceLength = 0.5; // cm
+		if (sourceType === 'point') {
+    			geometricalFactor = Math.abs(1 / Math.pow(r, 2)); // Point source approximation
+		} else {
+   			 const { theta1, theta2 } = calculateTheta(calcPoint, dwellPoint, sourceLength);
+
+    		if (theta === 0) {
+       			 geometricalFactor = (1 / (r^2 - L^2/4)) / 0.978; // Line source approximation for theta = 0
+   		 } else {
+        		geometricalFactor = Math.abs((theta2 - theta1) / (sourceLength * r * Math.sin(theta * (Math.PI / 180)))) / 0.978; // Line source approximation for theta != 0
+    }
+}
+
+            // Dose rate and total dose
+            const Sk = activity * 4.03; // cGy·cm²/hr·mCi
+            const Lambda = 1.100; // cGy/hr·U
+            const doseRate = Sk * Lambda * geometricalFactor * gL * F_r; // cGy/hr
+            const totalDose = doseRate * (dwellTime / 3600); // cGy
+
+            // Update results
+            document.getElementById('distance').innerText = r.toFixed(6);
+            document.getElementById('angle').innerText = theta.toFixed(6);
+            document.getElementById('radial-dose').innerText = gL.toFixed(6);
+            document.getElementById('anisotropy').innerText = F_r.toFixed(6);
+            document.getElementById('geometrical-factor').innerText = geometricalFactor.toFixed(6);
+            document.getElementById('dose-rate').innerText = doseRate.toFixed(6);
+            document.getElementById('total-dose').innerText = totalDose.toFixed(6);
+
+            document.getElementById('result-section').style.display = 'block';
+        };
+
+        reader.readAsArrayBuffer(file);
+    });
+
+    function interpolate(x, xArray, yArray) {
+        for (let i = 0; i < xArray.length - 1; i++) {
+            if (x >= xArray[i] && x <= xArray[i + 1]) {
+                const x1 = xArray[i], x2 = xArray[i + 1];
+                const y1 = yArray[i], y2 = yArray[i + 1];
+                return y1 + ((y2 - y1) * (x - x1)) / (x2 - x1);
+            }
+        }
+        return yArray[yArray.length - 1]; // Extrapolate if out of bounds
+    }
+
+    // Compute theta1 and theta2 for line source approximation
+    function calculateTheta(calcPoint, dwellPoint, sourceLength) {
+        const horizontalDistance = Math.sqrt(
+            Math.pow(calcPoint[0] - dwellPoint[0], 2) + Math.pow(calcPoint[1] - dwellPoint[1], 2)
+        );
+
+        const z1 = calcPoint[2] - dwellPoint[2] + sourceLength / 2; // Start of the source
+        const z2 = calcPoint[2] - dwellPoint[2] - sourceLength / 2; // End of the source
+
+        const theta1 = Math.atan(z1 / horizontalDistance); // In radians
+        const theta2 = Math.atan(z2 / horizontalDistance); // In radians
+
+        return { theta1, theta2 };
+    }
+</script>
+
+</body>
+</html>
